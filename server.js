@@ -166,5 +166,17 @@ app.post("/complete-course", (req, res) => {
   res.json({ certificate: `Certificate of Completion — ${user} has successfully completed ${course}` });
 });
 
+// ✅ NEW: Stats endpoint for Admin Panel
+app.get("/stats", async (req, res) => {
+  const [users] = await db.execute("SELECT COUNT(*) as count FROM users");
+  const [courses] = await db.execute("SELECT COUNT(*) as count FROM courses");
+  const [study] = await db.execute("SELECT COUNT(*) as count FROM study");
+  res.json({
+    users: users[0].count,
+    courses: courses[0].count,
+    study: study[0].count
+  });
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT} — Ready for the world!`));
