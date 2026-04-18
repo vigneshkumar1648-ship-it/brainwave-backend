@@ -4,7 +4,7 @@ const mysql = require("mysql2/promise");
 const OpenAI = require("openai");
 
 const app = express();
-app.use(cors());
+app.use(cors({ origin: "*" }));
 app.use(express.json());
 
 const client = new OpenAI({
@@ -16,7 +16,8 @@ const ADMIN_PASSWORD = "admin123";
 
 const db = mysql.createPool({
   uri: "mysql://root:aqiAgqbvtDNCLZNTYzWweiDxFLznxgmf@roundhouse.proxy.rlwy.net:57077/railway",
-  waitForConnections: true
+  waitForConnections: true,
+  ssl: { rejectUnauthorized: false }
 });
 
 async function setupDB() {
