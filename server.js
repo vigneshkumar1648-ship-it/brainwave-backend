@@ -15,27 +15,17 @@ const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || "secret123";
 
 // ── Firebase Admin Setup ──────────────────────────────────────────────────────
-const firebaseServiceAccount = process.env.FIREBASE_SERVICE_ACCOUNT
-  ? JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)
-  : {
-      "type": "service_account",
-      "project_id": "brainwaves-e207b",
-      "private_key_id": "b75461be6962fcae5682eb290402ba7ffdadcc17",
-      "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCyqOEjLEPzu+0/\nDa1IHw2YMqROEoG1VHkMMhuibejEpTgXTvn9qZFcoDDxK6/xZgO/ggnSi6vDCrbX\nYxFLr+pODe4bGAZcZznyz1EuY3u8khx7ulfWABQFQs7jnDlTORghxCUmM8jQY3tN\njjEoPWVfnmp9M17oloAsVXGq+8XcaBSTcuWbzYO/a5AQkXJJofGjbb4nGekSbL7K\nfw0Klu+hsDTSEhNZzeJX2S8xjvNS+2ZChOO7R431SNBExG6A9V6yL1rUExrX59Cm\nK3DycvZOImg21a23Zhw2n3pzLRM/b28XGOFbCpc3eWHLixy0xdrAubrRHQVc8YcI\nsXEc+jlDAgMBAAECggEAKC5iQCpe+AzOjW1SiRNu18mf+W0hHfqrJMqKO4xTmxJ7\nnIZnJB1Ec5wVldAZCIZElog1FFTUYw/gUm3WAHtGi5qHcDGFkLeoqUrmO7QlKqKD\n5HHi+l7XId3GMRu8KtL+8e0u27ou0mtlWmp99MpmJ8y1r4XjtRTQK+hloapxdCHV\n3cw7lY4B2cGD6R5B6T1Mb3AEkjnFz1CgiuqbJtGAm4n0L5Z0nTBqVu8HrznDqaU2\n8iJVQ5wdJDlWLDEs2R4fIXlQZraeMCeE/82F/eHPHcPPBYwDIGG3KWZLPqJ5x3/N\nqZOEQ4eWqA4LXo4s3uk7o40btLU650TLE5aH9A36jQKBgQDo++FiY9cFHUUAKEnI\nLW7baQaHcaZ5OrpNFWPpyzr1q0t2Us02YSJsO0k+E6fyaVscioripQ3v1xtrOIr8\n1Tk/OuzcDvZ4q3xTXJplfgx2HSfQoRuw5LbAKtoFfdHIVLpwBZPcocrmfvKab2k4\nT1JZNnzcuqx3lBf/NVO69gMwTQKBgQDETyZKnD7uR+p9scIIRb2qWXwL/LuuAI6b\nbxvz65JrKxZ+/T9amjhweDDkTaGegWI89tqI34aW7iMSMRmUyNGPTHTfxXwkueyp\n1xMKlEiKW/MILWc7u5i6WFuK4OJeDGZrXKJmUu9KC66xQcrngyzcDwFipUuF0AK/\ni5KE5OxXzwKBgFIdBDCjM5NP35PQn0B4Eswt1elCuwObGTI1ycMKp7sSJkSLplv2\nHCW9N3EziEu9qikDAzQiLClNzRIbGZFGrSiF4hklBOU+u1C+IISIymeOmwvC3Hma\nAnb0I2cwExHiGtuEe7qVI2fdci/P+GuqOUHMHHHHMSXsAhEmgF4yeqk5AoGAUJ10\nSxVo3m9YA3AZD06cebUvtLh/1g/SgFAbeYqW4T2bimCzQKCuZrlk0oxyv2XAkuqI\nicbJPXfjnRfeunPRYvhx0mcF+QsE/iYdYq3MME1cO1Jx31zFdljMlvaM3zRWZuZu\npniOXaj4f0BWc8YxiNj8p6bbocLvLfvCGqLrz48CgYEA4fPH13Y3XasQWaF3fFao\nQT3hHqI9YcnQcaJvdH3weqNpT2TJ4xVJvp5A9T8Rld2UAqEjoBFYFSLkQ872BBm7\nnjRz2Pe9SMMN45NhZDLTuhlKDfQnr9QhE5MI7CtP9xgD195hewHajZ+ysM/AUIQP\nGBzYpMsXUnee3bc4BPkN3CA=\n-----END PRIVATE KEY-----\n",
-      "client_email": "firebase-adminsdk-fbsvc@brainwaves-e207b.iam.gserviceaccount.com",
-      "client_id": "115928280297900280774",
-      "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-      "token_uri": "https://oauth2.googleapis.com/token",
-      "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-      "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/firebase-adminsdk-fbsvc%40brainwaves-e207b.iam.gserviceaccount.com",
-      "universe_domain": "googleapis.com"
-    };
-
-try {
-  admin.initializeApp({ credential: admin.credential.cert(firebaseServiceAccount) });
-  console.log("Firebase Admin initialized ✅");
-} catch (e) {
-  console.warn("Firebase Admin init failed:", e.message);
+// Add FIREBASE_SERVICE_ACCOUNT env var on Render with your service account JSON
+if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+  try {
+    const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+    admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
+    console.log("Firebase Admin initialized ✅");
+  } catch (e) {
+    console.warn("Firebase Admin init failed:", e.message);
+  }
+} else {
+  console.warn("⚠️ FIREBASE_SERVICE_ACCOUNT not set — Google/Phone login disabled");
 }
 
 // Groq for AI text (notes, quiz, ask-ai)
