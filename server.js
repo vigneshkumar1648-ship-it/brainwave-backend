@@ -5,8 +5,8 @@ const OpenAI = require("openai");
 const jwt = require("jsonwebtoken");
 
 const app = express();
+
 app.use(cors({ origin: "*" }));
-app.use(cors());
 app.use(express.json());
 
 const JWT_SECRET = process.env.JWT_SECRET || "secret123";
@@ -22,7 +22,6 @@ const db = mysql.createPool({
   uri: process.env.DATABASE_URL,
   waitForConnections: true,
   ssl: { rejectUnauthorized: false }
-  waitForConnections: true
 });
 
 /* ================= DB SETUP ================= */
@@ -63,9 +62,9 @@ async function setupDB() {
       )
     `);
 
-    console.log("✅ DB Ready");
+    console.log("DB Ready");
   } catch (err) {
-    console.error("❌ DB Setup Error:", err);
+    console.error("DB Setup Error:", err);
   }
 }
 setupDB();
@@ -77,7 +76,6 @@ function auth(req, res, next) {
   if (!token) {
     return res.status(401).json({ error: "No token" });
   }
-  if (!token) return res.status(401).json({ error: "No token" });
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
@@ -85,7 +83,6 @@ function auth(req, res, next) {
     next();
   } catch (err) {
     return res.status(401).json({ error: "Invalid token" });
-    res.status(401).json({ error: "Invalid token" });
   }
 }
 
@@ -94,16 +91,18 @@ app.post("/register", async (req, res) => {
   try {
     const { name, password } = req.body;
 
-    if (!name || !password)
+    if (!name || !password) {
       return res.status(400).json({ error: "Missing fields" });
+    }
 
     const [rows] = await db.execute(
       "SELECT * FROM users WHERE name=?",
       [name]
     );
 
-    if (rows.length)
+    if (rows.length) {
       return res.json({ message: "User exists" });
+    }
 
     await db.execute(
       "INSERT INTO users (name,password) VALUES (?,?)",
@@ -111,7 +110,6 @@ app.post("/register", async (req, res) => {
     );
 
     res.json({ message: "Registered" });
-
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Server error" });
@@ -127,13 +125,13 @@ app.post("/login", async (req, res) => {
       [name, password]
     );
 
-    if (!rows.length)
+    if (!rows.length) {
       return res.status(401).json({ error: "Invalid credentials" });
+    }
 
     const token = jwt.sign({ name }, JWT_SECRET, { expiresIn: "7d" });
 
     res.json({ token, user: { name } });
-
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Server error" });
@@ -154,8 +152,9 @@ app.post("/add-course", async (req, res) => {
   try {
     const { title, video } = req.body;
 
-    if (!title || !video)
+    if (!title || !video) {
       return res.status(400).json({ error: "Missing fields" });
+    }
 
     await db.execute(
       "INSERT INTO courses (title, video) VALUES (?,?)",
@@ -163,7 +162,6 @@ app.post("/add-course", async (req, res) => {
     );
 
     res.json({ message: "Course added" });
-
   } catch (err) {
     res.status(500).json({ error: "Error" });
   }
@@ -174,13 +172,18 @@ app.post("/generate-notes", auth, async (req, res) => {
   try {
     const { className, subject, chapter } = req.body;
 
+    if (!className || !subject || !chapter) {
+      return res.status(400).json({ error: "Missing fields" });
+    }
+
     const [rows] = await db.execute(
       "SELECT * FROM notes WHERE className=? AND subject=? AND chapter=?",
       [className, subject, chapter]
     );
 
-    if (rows.length)
+    if (rows.length) {
       return res.json({ notes: rows[0].content });
+    }
 
     const ai = await client.chat.completions.create({
       model: "llama-3.3-70b-versatile",
@@ -198,7 +201,6 @@ app.post("/generate-notes", auth, async (req, res) => {
     );
 
     res.json({ notes: content });
-
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "AI error" });
@@ -210,8 +212,9 @@ app.post("/study", auth, async (req, res) => {
   try {
     const { chapter } = req.body;
 
-    if (!chapter)
+    if (!chapter) {
       return res.status(400).json({ error: "Missing chapter" });
+    }
 
     await db.execute(
       "INSERT IGNORE INTO study (user, chapter) VALUES (?,?)",
@@ -219,7 +222,6 @@ app.post("/study", auth, async (req, res) => {
     );
 
     res.json({ message: "Tracked" });
-
   } catch (err) {
     res.status(500).json({ error: "Error" });
   }
@@ -234,9 +236,8 @@ app.get("/progress", auth, async (req, res) => {
 
     res.json({
       total: rows.length,
-      chapters: rows.map(r => r.chapter)
+      chapters: rows.map((r) => r.chapter)
     });
-
   } catch (err) {
     res.status(500).json({ error: "Error" });
   }
@@ -247,8 +248,9 @@ app.post("/ask-ai", auth, async (req, res) => {
   try {
     const { question } = req.body;
 
-    if (!question)
+    if (!question) {
       return res.status(400).json({ error: "Missing question" });
+    }
 
     const ai = await client.chat.completions.create({
       model: "llama-3.3-70b-versatile",
@@ -259,10 +261,51 @@ app.post("/ask-ai", auth, async (req, res) => {
     });
 
     res.json({ answer: ai.choices[0].message.content });
-
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "AI error" });
+  }
+});
+
+/* ================= QUIZ ================= */
+app.post("/quiz", auth, async (req, res) => {
+  try {
+    const { className, subject, chapter } = req.body;
+
+    if (!className || !subject || !chapter) {
+      return res.status(400).json({ error: "Missing fields" });
+    }
+
+    const ai = await client.chat.completions.create({
+      model: "llama-3.3-70b-versatile",
+      messages: [
+        { role: "system", content: "Create a short quiz with answers" },
+        { role: "user", content: `${className} ${subject} ${chapter}` }
+      ]
+    });
+
+    res.json({ quiz: ai.choices[0].message.content });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Quiz error" });
+  }
+});
+
+/* ================= LEADERBOARD ================= */
+app.get("/leaderboard", async (req, res) => {
+  try {
+    const [rows] = await db.execute(`
+      SELECT user AS name, COUNT(*) AS points
+      FROM study
+      GROUP BY user
+      ORDER BY points DESC
+      LIMIT 10
+    `);
+
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Leaderboard error" });
   }
 });
 
@@ -276,22 +319,19 @@ app.get("/stats", async (req, res) => {
       users: u[0].c,
       study: s[0].c
     });
-
-    res.json({ users: u[0].c, study: s[0].c });
   } catch (err) {
     res.status(500).json({ error: "Error" });
   }
 });
 
-/* ================= HEALTH CHECK ================= */
 /* ================= HEALTH ================= */
 app.get("/", (req, res) => {
-  res.send("🚀 BrainWave Backend Running");
+  res.send("BrainWave Backend Running");
 });
 
 /* ================= START ================= */
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 });
