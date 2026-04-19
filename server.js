@@ -4,6 +4,7 @@ const mysql = require("mysql2/promise");
 const OpenAI = require("openai");
 const jwt = require("jsonwebtoken");
 const https = require("https");
+const admin = require("firebase-admin");
 
 const app = express();
 
@@ -13,13 +14,35 @@ app.use(express.json({ limit: "2mb" }));
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || "secret123";
 
+// ── Firebase Admin Setup ──────────────────────────────────────────────────────
+const firebaseServiceAccount = process.env.FIREBASE_SERVICE_ACCOUNT
+  ? JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)
+  : {
+      "type": "service_account",
+      "project_id": "brainwaves-e207b",
+      "private_key_id": "b75461be6962fcae5682eb290402ba7ffdadcc17",
+      "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCyqOEjLEPzu+0/\nDa1IHw2YMqROEoG1VHkMMhuibejEpTgXTvn9qZFcoDDxK6/xZgO/ggnSi6vDCrbX\nYxFLr+pODe4bGAZcZznyz1EuY3u8khx7ulfWABQFQs7jnDlTORghxCUmM8jQY3tN\njjEoPWVfnmp9M17oloAsVXGq+8XcaBSTcuWbzYO/a5AQkXJJofGjbb4nGekSbL7K\nfw0Klu+hsDTSEhNZzeJX2S8xjvNS+2ZChOO7R431SNBExG6A9V6yL1rUExrX59Cm\nK3DycvZOImg21a23Zhw2n3pzLRM/b28XGOFbCpc3eWHLixy0xdrAubrRHQVc8YcI\nsXEc+jlDAgMBAAECggEAKC5iQCpe+AzOjW1SiRNu18mf+W0hHfqrJMqKO4xTmxJ7\nnIZnJB1Ec5wVldAZCIZElog1FFTUYw/gUm3WAHtGi5qHcDGFkLeoqUrmO7QlKqKD\n5HHi+l7XId3GMRu8KtL+8e0u27ou0mtlWmp99MpmJ8y1r4XjtRTQK+hloapxdCHV\n3cw7lY4B2cGD6R5B6T1Mb3AEkjnFz1CgiuqbJtGAm4n0L5Z0nTBqVu8HrznDqaU2\n8iJVQ5wdJDlWLDEs2R4fIXlQZraeMCeE/82F/eHPHcPPBYwDIGG3KWZLPqJ5x3/N\nqZOEQ4eWqA4LXo4s3uk7o40btLU650TLE5aH9A36jQKBgQDo++FiY9cFHUUAKEnI\nLW7baQaHcaZ5OrpNFWPpyzr1q0t2Us02YSJsO0k+E6fyaVscioripQ3v1xtrOIr8\n1Tk/OuzcDvZ4q3xTXJplfgx2HSfQoRuw5LbAKtoFfdHIVLpwBZPcocrmfvKab2k4\nT1JZNnzcuqx3lBf/NVO69gMwTQKBgQDETyZKnD7uR+p9scIIRb2qWXwL/LuuAI6b\nbxvz65JrKxZ+/T9amjhweDDkTaGegWI89tqI34aW7iMSMRmUyNGPTHTfxXwkueyp\n1xMKlEiKW/MILWc7u5i6WFuK4OJeDGZrXKJmUu9KC66xQcrngyzcDwFipUuF0AK/\ni5KE5OxXzwKBgFIdBDCjM5NP35PQn0B4Eswt1elCuwObGTI1ycMKp7sSJkSLplv2\nHCW9N3EziEu9qikDAzQiLClNzRIbGZFGrSiF4hklBOU+u1C+IISIymeOmwvC3Hma\nAnb0I2cwExHiGtuEe7qVI2fdci/P+GuqOUHMHHHHMSXsAhEmgF4yeqk5AoGAUJ10\nSxVo3m9YA3AZD06cebUvtLh/1g/SgFAbeYqW4T2bimCzQKCuZrlk0oxyv2XAkuqI\nicbJPXfjnRfeunPRYvhx0mcF+QsE/iYdYq3MME1cO1Jx31zFdljMlvaM3zRWZuZu\npniOXaj4f0BWc8YxiNj8p6bbocLvLfvCGqLrz48CgYEA4fPH13Y3XasQWaF3fFao\nQT3hHqI9YcnQcaJvdH3weqNpT2TJ4xVJvp5A9T8Rld2UAqEjoBFYFSLkQ872BBm7\nnjRz2Pe9SMMN45NhZDLTuhlKDfQnr9QhE5MI7CtP9xgD195hewHajZ+ysM/AUIQP\nGBzYpMsXUnee3bc4BPkN3CA=\n-----END PRIVATE KEY-----\n",
+      "client_email": "firebase-adminsdk-fbsvc@brainwaves-e207b.iam.gserviceaccount.com",
+      "client_id": "115928280297900280774",
+      "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+      "token_uri": "https://oauth2.googleapis.com/token",
+      "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+      "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/firebase-adminsdk-fbsvc%40brainwaves-e207b.iam.gserviceaccount.com",
+      "universe_domain": "googleapis.com"
+    };
+
+try {
+  admin.initializeApp({ credential: admin.credential.cert(firebaseServiceAccount) });
+  console.log("Firebase Admin initialized ✅");
+} catch (e) {
+  console.warn("Firebase Admin init failed:", e.message);
+}
+
 // Groq for AI text (notes, quiz, ask-ai)
 const chatClient = new OpenAI({
   apiKey: process.env.GROQ_API_KEY,
   baseURL: "https://api.groq.com/openai/v1"
 });
-
-// ✅ NO OpenAI image client needed — using Pollinations.AI (free, no key)
 
 const db = mysql.createPool({
   uri: process.env.DATABASE_URL,
@@ -142,7 +165,6 @@ async function askGroq(systemPrompt, userPrompt) {
   return ai.choices?.[0]?.message?.content || "";
 }
 
-// Build a rich descriptive prompt for image generation
 function buildImagePrompt({ prompt, style, size, subject, chapter }) {
   return [
     normalizeText(prompt),
@@ -157,7 +179,6 @@ function buildImagePrompt({ prompt, style, size, subject, chapter }) {
     .join(", ");
 }
 
-// Map size label to pixel dimensions for Pollinations
 function getSizeDimensions(size) {
   const map = {
     "Square":    { width: 1024, height: 1024 },
@@ -170,7 +191,6 @@ function getSizeDimensions(size) {
   return map[size] || { width: 1024, height: 1024 };
 }
 
-// ✅ Build Pollinations image URL — FREE, no API key needed
 function buildPollinationsUrl(prompt, width, height) {
   const seed = Math.floor(Math.random() * 999999);
   const encoded = encodeURIComponent(prompt);
@@ -208,6 +228,36 @@ app.post("/login", async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Server error" });
+  }
+});
+
+// ─── NEW: Firebase Token Verify Login (Google / Phone) ────────────────────────
+// Frontend sends Firebase ID token → we verify it → issue our JWT
+app.post("/firebase-login", async (req, res) => {
+  try {
+    if (!admin.apps.length) {
+      return res.status(503).json({ error: "Firebase Admin not configured on server" });
+    }
+    const idToken = normalizeText(req.body.idToken);
+    if (!idToken) return res.status(400).json({ error: "Missing idToken" });
+
+    const decoded = await admin.auth().verifyIdToken(idToken);
+    const uid = decoded.uid;
+    const displayName = decoded.name || decoded.email?.split("@")[0] || "user_" + uid.slice(0, 8);
+    const name = displayName.replace(/[^a-zA-Z0-9_]/g, "_").slice(0, 50);
+    const password = "firebase_" + uid;
+
+    // Upsert user
+    const [rows] = await db.execute("SELECT id FROM users WHERE name=?", [name]);
+    if (!rows.length) {
+      await db.execute("INSERT INTO users (name, password) VALUES (?, ?)", [name, password]);
+    }
+
+    const token = jwt.sign({ name }, JWT_SECRET, { expiresIn: "7d" });
+    res.json({ token, user: { name, displayName } });
+  } catch (err) {
+    console.error("Firebase login error:", err);
+    res.status(401).json({ error: "Firebase token invalid or expired" });
   }
 });
 
@@ -494,7 +544,7 @@ app.delete("/bookmarks/:id", auth, async (req, res) => {
   }
 });
 
-// ─── Image Generation ✅ Pollinations.AI (FREE — no API key needed) ────────────
+// ─── Image Generation ✅ Pollinations.AI (FREE) ────────────────────────────────
 
 app.post("/generate-image", auth, async (req, res) => {
   try {
@@ -506,26 +556,16 @@ app.post("/generate-image", auth, async (req, res) => {
 
     if (!prompt) return res.status(400).json({ error: "Missing prompt" });
 
-    // Build enriched prompt
     const finalPrompt = buildImagePrompt({ prompt, style, size, subject, chapter });
-
-    // Get pixel dimensions
     const { width, height } = getSizeDimensions(size);
-
-    // Build Pollinations URL — works instantly, no API key
     const imageUrl = buildPollinationsUrl(finalPrompt, width, height);
 
-    // Save to DB
     await db.execute(
       "INSERT INTO generated_images (user, prompt, style, size, imageUrl) VALUES (?, ?, ?, ?, ?)",
       [req.user, finalPrompt, style, size, imageUrl]
     );
 
-    res.json({
-      promptEnhanced: finalPrompt,
-      imageUrl,
-      b64_json: null
-    });
+    res.json({ promptEnhanced: finalPrompt, imageUrl, b64_json: null });
   } catch (err) {
     console.error("Image generation error:", err);
     res.status(500).json({ error: "Image generation failed. Please try again." });
