@@ -9,23 +9,20 @@ const app = express();
 app.use(cors({ origin: "*" }));
 app.use(express.json({ limit: "2mb" }));
 
-const PORT = 3000;
-const JWT_SECRET = "brainwavex_7f29c1e4_4b8a_9d2f_secure_2026";
-const DATABASE_URL = "mysql://root:aqiAgqbvtDNCLZNTYzWweiDxFLznxgmf@roundhouse.proxy.rlwy.net:57077/railway";
-const GROQ_API_KEY = "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";
-const OPENAI_API_KEY = "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";
+const PORT = process.env.PORT || 3000;
+const JWT_SECRET = process.env.JWT_SECRET || "secret123";
 
 const chatClient = new OpenAI({
-  apiKey: GROQ_API_KEY,
+  apiKey: process.env.GROQ_API_KEY,
   baseURL: "https://api.groq.com/openai/v1"
 });
 
-const imageClient = OPENAI_API_KEY
-  ? new OpenAI({ apiKey: OPENAI_API_KEY })
+const imageClient = process.env.OPENAI_API_KEY
+  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
   : null;
 
 const db = mysql.createPool({
-  uri: DATABASE_URL,
+  uri: process.env.DATABASE_URL,
   waitForConnections: true,
   connectionLimit: 10,
   ssl: { rejectUnauthorized: false }
@@ -146,7 +143,7 @@ function normalizeText(value) {
 }
 
 async function askGroq(systemPrompt, userPrompt) {
-  if (!GROQ_API_KEY) {
+  if (!process.env.GROQ_API_KEY) {
     throw new Error("GROQ_API_KEY is not configured");
   }
 
