@@ -9,13 +9,12 @@ const admin = require("firebase-admin");
 const app = express();
 
 app.use(cors({ origin: "*" }));
-app.use(express.json({ limit: "2mb" }));
+app.use(express.json({ limit: "10mb" })); // increased for base64 image OCR
 
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || "secret123";
 
 // ── Firebase Admin Setup ──────────────────────────────────────────────────────
-// Add FIREBASE_SERVICE_ACCOUNT env var on Render with your service account JSON
 if (process.env.FIREBASE_SERVICE_ACCOUNT) {
   try {
     const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
@@ -119,7 +118,17 @@ async function setupDB() {
         createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
-    console.log("DB Ready");
+    // ── NEW: Suggestions table ─────────────────────────────────────────────────
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS suggestions (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user VARCHAR(100),
+        type VARCHAR(100),
+        text TEXT,
+        createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log("DB Ready ✅");
   } catch (err) {
     console.error("DB Setup Error:", err);
   }
@@ -127,8 +136,11 @@ async function setupDB() {
 
 setupDB();
 
+// ── Auth Middleware (FIXED: strips "Bearer " prefix) ──────────────────────────
 function auth(req, res, next) {
-  const token = req.headers.authorization;
+  let token = req.headers.authorization || "";
+  // Strip "Bearer " prefix if present
+  if (token.startsWith("Bearer ")) token = token.slice(7);
   if (!token) return res.status(401).json({ error: "No token" });
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
@@ -221,8 +233,7 @@ app.post("/login", async (req, res) => {
   }
 });
 
-// ─── NEW: Firebase Token Verify Login (Google / Phone) ────────────────────────
-// Frontend sends Firebase ID token → we verify it → issue our JWT
+// ─── Firebase Token Verify Login (Google) ─────────────────────────────────────
 app.post("/firebase-login", async (req, res) => {
   try {
     if (!admin.apps.length) {
@@ -237,7 +248,6 @@ app.post("/firebase-login", async (req, res) => {
     const name = displayName.replace(/[^a-zA-Z0-9_]/g, "_").slice(0, 50);
     const password = "firebase_" + uid;
 
-    // Upsert user
     const [rows] = await db.execute("SELECT id FROM users WHERE name=?", [name]);
     if (!rows.length) {
       await db.execute("INSERT INTO users (name, password) VALUES (?, ?)", [name, password]);
@@ -534,7 +544,7 @@ app.delete("/bookmarks/:id", auth, async (req, res) => {
   }
 });
 
-// ─── Image Generation ✅ Pollinations.AI (FREE) ────────────────────────────────
+// ─── Image Generation (Pollinations.AI - FREE) ────────────────────────────────
 
 app.post("/generate-image", auth, async (req, res) => {
   try {
@@ -572,6 +582,78 @@ app.get("/generated-images", auth, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Image history error" });
+  }
+});
+
+// ─── NEW: OCR — Extract text from image using Groq vision ─────────────────────
+// Groq's llama vision model handles base64 images
+app.post("/ocr", auth, async (req, res) => {
+  try {
+    const { imageBase64, mediaType } = req.body;
+    if (!imageBase64) return res.status(400).json({ error: "Missing imageBase64" });
+
+    const mtype = normalizeText(mediaType || "image/jpeg");
+
+    if (!process.env.GROQ_API_KEY) throw new Error("GROQ_API_KEY not configured");
+
+    const response = await chatClient.chat.completions.create({
+      model: "meta-llama/llama-4-scout-17b-16e-instruct", // Groq vision model
+      max_tokens: 2000,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "image_url",
+              image_url: {
+                url: `data:${mtype};base64,${imageBase64}`
+              }
+            },
+            {
+              type: "text",
+              text: "Extract ALL text from this image exactly as it appears. Preserve structure, headings, bullet points, equations, and formatting. If it's handwritten, do your best. Output only the extracted text, nothing else."
+            }
+          ]
+        }
+      ]
+    });
+
+    const extracted = response.choices?.[0]?.message?.content?.trim() || "";
+    if (!extracted) return res.json({ text: "Could not extract text. Try a clearer image." });
+    res.json({ text: extracted });
+  } catch (err) {
+    console.error("OCR error:", err);
+    res.status(500).json({ error: "OCR failed: " + err.message });
+  }
+});
+
+// ─── NEW: Suggestions — save to DB ────────────────────────────────────────────
+app.post("/suggest", auth, async (req, res) => {
+  try {
+    const type = normalizeText(req.body.type || "General Feedback");
+    const text = normalizeText(req.body.text);
+    if (!text) return res.status(400).json({ error: "Missing suggestion text" });
+    await db.execute(
+      "INSERT INTO suggestions (user, type, text) VALUES (?, ?, ?)",
+      [req.user, type, text]
+    );
+    res.json({ message: "Suggestion saved" });
+  } catch (err) {
+    console.error("Suggest error:", err);
+    res.status(500).json({ error: "Could not save suggestion" });
+  }
+});
+
+// ─── NEW: Get all suggestions (admin view) ────────────────────────────────────
+app.get("/suggestions", async (req, res) => {
+  try {
+    const [rows] = await db.execute(
+      "SELECT id, user, type, text, createdAt FROM suggestions ORDER BY id DESC LIMIT 100"
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error fetching suggestions" });
   }
 });
 
