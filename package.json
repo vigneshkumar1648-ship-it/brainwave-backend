@@ -1,14 +1,18 @@
 {
   "name": "brainwave-backend",
   "version": "1.0.0",
+  "description": "BrainWave AI Backend",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
+  "author": "",
+  "license": "ISC",
   "dependencies": {
     "express": "^4.18.2",
     "cors": "^2.8.5",
     "mysql2": "^3.6.0",
-    "openai": "^4.0.0"
+    "openai": "^4.0.0",
+    "jsonwebtoken": "^9.0.0"
   }
 }
