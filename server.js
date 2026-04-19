@@ -2,177 +2,222 @@ const express = require("express");
 const cors = require("cors");
 const mysql = require("mysql2/promise");
 const OpenAI = require("openai");
+const jwt = require("jsonwebtoken");
 
 const app = express();
 app.use(cors({ origin: "*" }));
 app.use(express.json());
 
-// OpenAI Client (Groq)
+const JWT_SECRET = process.env.JWT_SECRET || "secret123";
+
+// ✅ AI Client (Groq)
 const client = new OpenAI({
   apiKey: process.env.GROQ_API_KEY,
   baseURL: "https://api.groq.com/openai/v1"
 });
 
-const ADMIN_PASSWORD = "admin123";
-
-// MySQL Connection Pool
+// ✅ DB
 const db = mysql.createPool({
   uri: process.env.DATABASE_URL,
   waitForConnections: true,
   ssl: { rejectUnauthorized: false }
 });
 
-// Setup Database Tables
+// ✅ Setup DB
 async function setupDB() {
+  await db.execute(`CREATE TABLE IF NOT EXISTS users (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) UNIQUE,
+    password VARCHAR(100)
+  )`);
+
+  await db.execute(`CREATE TABLE IF NOT EXISTS courses (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    title VARCHAR(200),
+    video VARCHAR(500)
+  )`);
+
+  await db.execute(`CREATE TABLE IF NOT EXISTS notes (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    className VARCHAR(10),
+    subject VARCHAR(100),
+    chapter VARCHAR(200),
+    content TEXT
+  )`);
+
+  await db.execute(`CREATE TABLE IF NOT EXISTS study (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user VARCHAR(100),
+    chapter VARCHAR(200),
+    UNIQUE(user, chapter)
+  )`);
+
+  console.log("✅ DB Ready");
+}
+setupDB();
+
+// ✅ AUTH MIDDLEWARE
+function auth(req, res, next) {
+  const token = req.headers.authorization;
+  if (!token) return res.status(401).json({ error: "No token" });
+
   try {
-    // Users table with points
-    await db.execute(`
-      CREATE TABLE IF NOT EXISTS users (
-        id INT AUTO_INCREMENT PRIMARY KEY, 
-        name VARCHAR(100) UNIQUE, 
-        password VARCHAR(100),
-        points INT DEFAULT 0
-      )
-    `);
-
-    await db.execute(`CREATE TABLE IF NOT EXISTS courses (id INT AUTO_INCREMENT PRIMARY KEY, title VARCHAR(200), video VARCHAR(500))`);
-    await db.execute(`CREATE TABLE IF NOT EXISTS notes (id INT AUTO_INCREMENT PRIMARY KEY, className VARCHAR(10), subject VARCHAR(100), chapter VARCHAR(200), content TEXT)`);
-    await db.execute(`CREATE TABLE IF NOT EXISTS study (id INT AUTO_INCREMENT PRIMARY KEY, user VARCHAR(100), chapter VARCHAR(200), date TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`);
-
-    console.log("✅ MySQL Database and tables ready with Points System!");
-  } catch (err) {
-    console.error("Database setup error:", err);
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.user = decoded.name;
+    next();
+  } catch {
+    res.status(401).json({ error: "Invalid token" });
   }
 }
 
-setupDB();
-
-// Hardcoded Syllabus
-const syllabus = { /* ... your existing syllabus object ... */ };   // Keep your full syllabus here
-
-let memory = {};
-
-// ====================== AUTH ======================
+// ================= AUTH =================
 app.post("/register", async (req, res) => {
-  const { name, password } = req.body;
   try {
-    const [rows] = await db.execute("SELECT * FROM users WHERE name = ?", [name]);
-    if (rows.length > 0) return res.json({ message: "User already exists" });
+    const { name, password } = req.body;
+    if (!name || !password)
+      return res.status(400).json({ error: "Missing fields" });
 
-    await db.execute("INSERT INTO users (name, password, points) VALUES (?, ?, 0)", [name, password]);
-    res.json({ message: "Registered successfully" });
-  } catch (err) {
-    res.status(500).json({ message: "Server error" });
+    const [rows] = await db.execute("SELECT * FROM users WHERE name=?", [name]);
+    if (rows.length) return res.json({ message: "User exists" });
+
+    await db.execute("INSERT INTO users (name,password) VALUES (?,?)", [name, password]);
+    res.json({ message: "Registered" });
+  } catch {
+    res.status(500).json({ error: "Server error" });
   }
 });
 
 app.post("/login", async (req, res) => {
-  const { name, password } = req.body;
   try {
-    const [rows] = await db.execute("SELECT name, points FROM users WHERE name = ? AND password = ?", [name, password]);
-    if (rows.length === 0) return res.status(401).json({ message: "Invalid credentials" });
-    
-    res.json({ 
-      message: "Login success", 
-      user: { name: rows[0].name, points: rows[0].points } 
-    });
-  } catch (err) {
-    res.status(500).json({ message: "Server error" });
+    const { name, password } = req.body;
+
+    const [rows] = await db.execute(
+      "SELECT * FROM users WHERE name=? AND password=?",
+      [name, password]
+    );
+
+    if (!rows.length) return res.status(401).json({ error: "Invalid" });
+
+    const token = jwt.sign({ name }, JWT_SECRET);
+
+    res.json({ token, user: { name } });
+  } catch {
+    res.status(500).json({ error: "Server error" });
   }
 });
 
-// ====================== LEADERBOARD ======================
-app.get("/leaderboard", async (req, res) => {
-  try {
-    const [rows] = await db.execute(`
-      SELECT name, points 
-      FROM users 
-      ORDER BY points DESC 
-      LIMIT 10
-    `);
-    res.json(rows);
-  } catch (err) {
-    res.status(500).json({ error: "Failed to load leaderboard" });
-  }
-});
-
-// ====================== POINTS SYSTEM ======================
-app.post("/add-points", async (req, res) => {
-  const { user, points: addedPoints } = req.body;
-  if (!user || !addedPoints) return res.status(400).json({ message: "Missing data" });
-
-  try {
-    await db.execute("UPDATE users SET points = points + ? WHERE name = ?", [addedPoints, user]);
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ message: "Failed to add points" });
-  }
-});
-
-// ====================== STUDY & PROGRESS ======================
-app.post("/study", async (req, res) => {
-  const { user, chapter } = req.body;
-  try {
-    await db.execute("INSERT INTO study (user, chapter) VALUES (?, ?)", [user, chapter]);
-    // Award 10 points for studying
-    await db.execute("UPDATE users SET points = points + 10 WHERE name = ?", [user]);
-    res.json({ message: "Study tracked +10 points" });
-  } catch (err) {
-    res.status(500).json({ message: "Server error" });
-  }
-});
-
-app.get("/progress/:user", async (req, res) => {
-  try {
-    const [studyRows] = await db.execute("SELECT COUNT(*) as total FROM study WHERE user = ?", [req.params.user]);
-    const [userRow] = await db.execute("SELECT points FROM users WHERE name = ?", [req.params.user]);
-    
-    res.json({ 
-      total: studyRows[0].total, 
-      points: userRow[0]?.points || 0 
-    });
-  } catch (err) {
-    res.status(500).json({ total: 0, points: 0 });
-  }
-});
-
-// ====================== OTHER ENDPOINTS (Keep existing) ======================
+// ================= CORE =================
 app.get("/courses", async (req, res) => {
   const [rows] = await db.execute("SELECT * FROM courses");
   res.json(rows);
 });
 
-app.get("/syllabus", (req, res) => res.json(syllabus));
-
-app.post("/generate-notes", async (req, res) => { /* your existing code */ });
-app.post("/ask-ai", async (req, res) => { /* your existing code */ });
-app.post("/quiz", async (req, res) => { /* your existing code */ });
-app.post("/exam", async (req, res) => { /* your existing code */ });
-app.post("/recommend", async (req, res) => { /* your existing code */ });
-
-app.post("/complete-course", async (req, res) => {
-  const { user, course } = req.body;
+app.post("/add-course", async (req, res) => {
   try {
-    // Award 50 points for completing course
-    await db.execute("UPDATE users SET points = points + 50 WHERE name = ?", [user]);
-    res.json({ 
-      certificate: `Certificate of Completion — ${user} has successfully completed ${course}` 
-    });
-  } catch (err) {
-    res.status(500).json({ message: "Server error" });
+    const { title, video } = req.body;
+    if (!title || !video)
+      return res.status(400).json({ error: "Missing" });
+
+    await db.execute("INSERT INTO courses (title, video) VALUES (?,?)", [title, video]);
+    res.json({ message: "Added" });
+  } catch {
+    res.status(500).json({ error: "Error" });
   }
 });
 
-app.get("/stats", async (req, res) => {
-  const [users] = await db.execute("SELECT COUNT(*) as count FROM users");
-  const [courses] = await db.execute("SELECT COUNT(*) as count FROM courses");
-  const [study] = await db.execute("SELECT COUNT(*) as count FROM study");
-  res.json({
-    users: users[0].count,
-    courses: courses[0].count,
-    study: study[0].count
-  });
+// ================= NOTES =================
+app.post("/generate-notes", auth, async (req, res) => {
+  try {
+    const { className, subject, chapter } = req.body;
+
+    const [rows] = await db.execute(
+      "SELECT * FROM notes WHERE className=? AND subject=? AND chapter=?",
+      [className, subject, chapter]
+    );
+
+    if (rows.length) return res.json({ notes: rows[0].content });
+
+    const ai = await client.chat.completions.create({
+      model: "llama-3.3-70b-versatile",
+      messages: [
+        { role: "system", content: "Write structured CBSE notes" },
+        { role: "user", content: `${className} ${subject} ${chapter}` }
+      ]
+    });
+
+    const content = ai.choices[0].message.content;
+
+    await db.execute(
+      "INSERT INTO notes (className,subject,chapter,content) VALUES (?,?,?,?)",
+      [className, subject, chapter, content]
+    );
+
+    res.json({ notes: content });
+  } catch {
+    res.status(500).json({ error: "AI error" });
+  }
 });
 
+// ================= STUDY =================
+app.post("/study", auth, async (req, res) => {
+  try {
+    const { chapter } = req.body;
+
+    await db.execute(
+      "INSERT IGNORE INTO study (user, chapter) VALUES (?,?)",
+      [req.user, chapter]
+    );
+
+    res.json({ message: "Tracked" });
+  } catch {
+    res.status(500).json({ error: "Error" });
+  }
+});
+
+app.get("/progress", auth, async (req, res) => {
+  try {
+    const [rows] = await db.execute(
+      "SELECT chapter FROM study WHERE user=?",
+      [req.user]
+    );
+
+    res.json({
+      total: rows.length,
+      chapters: rows.map(r => r.chapter)
+    });
+  } catch {
+    res.status(500).json({ error: "Error" });
+  }
+});
+
+// ================= AI =================
+app.post("/ask-ai", auth, async (req, res) => {
+  try {
+    const { question } = req.body;
+
+    const ai = await client.chat.completions.create({
+      model: "llama-3.3-70b-versatile",
+      messages: [{ role: "user", content: question }]
+    });
+
+    res.json({ answer: ai.choices[0].message.content });
+  } catch {
+    res.status(500).json({ error: "AI error" });
+  }
+});
+
+// ================= STATS =================
+app.get("/stats", async (req, res) => {
+  try {
+    const [u] = await db.execute("SELECT COUNT(*) c FROM users");
+    const [s] = await db.execute("SELECT COUNT(*) c FROM study");
+
+    res.json({ users: u[0].c, study: s[0].c });
+  } catch {
+    res.status(500).json({ error: "Error" });
+  }
+});
+
+// ================= START =================
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT} with Points & Leaderboard system!`));
+app.listen(PORT, () => console.log("🚀 Server running"));
