@@ -5,6 +5,7 @@ const OpenAI = require("openai");
 const jwt = require("jsonwebtoken");
 
 const app = express();
+app.use(cors({ origin: "*" }));
 app.use(cors());
 app.use(express.json());
 
@@ -19,6 +20,8 @@ const client = new OpenAI({
 /* ================= DB ================= */
 const db = mysql.createPool({
   uri: process.env.DATABASE_URL,
+  waitForConnections: true,
+  ssl: { rejectUnauthorized: false }
   waitForConnections: true
 });
 
@@ -70,6 +73,10 @@ setupDB();
 /* ================= AUTH MIDDLEWARE ================= */
 function auth(req, res, next) {
   const token = req.headers.authorization;
+
+  if (!token) {
+    return res.status(401).json({ error: "No token" });
+  }
   if (!token) return res.status(401).json({ error: "No token" });
 
   try {
@@ -77,6 +84,7 @@ function auth(req, res, next) {
     req.user = decoded.name;
     next();
   } catch (err) {
+    return res.status(401).json({ error: "Invalid token" });
     res.status(401).json({ error: "Invalid token" });
   }
 }
@@ -103,7 +111,9 @@ app.post("/register", async (req, res) => {
     );
 
     res.json({ message: "Registered" });
+
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: "Server error" });
   }
 });
@@ -123,7 +133,9 @@ app.post("/login", async (req, res) => {
     const token = jwt.sign({ name }, JWT_SECRET, { expiresIn: "7d" });
 
     res.json({ token, user: { name } });
+
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: "Server error" });
   }
 });
@@ -151,6 +163,7 @@ app.post("/add-course", async (req, res) => {
     );
 
     res.json({ message: "Course added" });
+
   } catch (err) {
     res.status(500).json({ error: "Error" });
   }
@@ -185,7 +198,9 @@ app.post("/generate-notes", auth, async (req, res) => {
     );
 
     res.json({ notes: content });
+
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: "AI error" });
   }
 });
@@ -195,12 +210,16 @@ app.post("/study", auth, async (req, res) => {
   try {
     const { chapter } = req.body;
 
+    if (!chapter)
+      return res.status(400).json({ error: "Missing chapter" });
+
     await db.execute(
       "INSERT IGNORE INTO study (user, chapter) VALUES (?,?)",
       [req.user, chapter]
     );
 
     res.json({ message: "Tracked" });
+
   } catch (err) {
     res.status(500).json({ error: "Error" });
   }
@@ -217,6 +236,7 @@ app.get("/progress", auth, async (req, res) => {
       total: rows.length,
       chapters: rows.map(r => r.chapter)
     });
+
   } catch (err) {
     res.status(500).json({ error: "Error" });
   }
@@ -227,6 +247,9 @@ app.post("/ask-ai", auth, async (req, res) => {
   try {
     const { question } = req.body;
 
+    if (!question)
+      return res.status(400).json({ error: "Missing question" });
+
     const ai = await client.chat.completions.create({
       model: "llama-3.3-70b-versatile",
       messages: [
@@ -236,7 +259,9 @@ app.post("/ask-ai", auth, async (req, res) => {
     });
 
     res.json({ answer: ai.choices[0].message.content });
+
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: "AI error" });
   }
 });
@@ -247,12 +272,18 @@ app.get("/stats", async (req, res) => {
     const [u] = await db.execute("SELECT COUNT(*) c FROM users");
     const [s] = await db.execute("SELECT COUNT(*) c FROM study");
 
+    res.json({
+      users: u[0].c,
+      study: s[0].c
+    });
+
     res.json({ users: u[0].c, study: s[0].c });
   } catch (err) {
     res.status(500).json({ error: "Error" });
   }
 });
 
+/* ================= HEALTH CHECK ================= */
 /* ================= HEALTH ================= */
 app.get("/", (req, res) => {
   res.send("🚀 BrainWave Backend Running");
@@ -260,6 +291,7 @@ app.get("/", (req, res) => {
 
 /* ================= START ================= */
 const PORT = process.env.PORT || 3000;
+
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
