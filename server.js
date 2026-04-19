@@ -657,6 +657,171 @@ app.get("/suggestions", async (req, res) => {
   }
 });
 
+// ─── Admin Auth Middleware ────────────────────────────────────────────────────
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "brainwaves_admin_2026";
+
+function adminAuth(req, res, next) {
+  const pass = normalizeText(req.headers["x-admin-password"] || req.body?.adminPassword || "");
+  if (pass !== ADMIN_PASSWORD) return res.status(403).json({ error: "Invalid admin password" });
+  next();
+}
+
+// ─── Admin: Get all users ─────────────────────────────────────────────────────
+app.post("/admin/users", adminAuth, async (req, res) => {
+  try {
+    const [rows] = await db.execute(
+      "SELECT id, name, createdAt FROM users ORDER BY id DESC"
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error fetching users" });
+  }
+});
+
+// ─── Admin: Delete user ───────────────────────────────────────────────────────
+app.post("/admin/delete-user", adminAuth, async (req, res) => {
+  try {
+    const name = normalizeText(req.body.name);
+    if (!name) return res.status(400).json({ error: "Missing name" });
+    await db.execute("DELETE FROM users WHERE name=?", [name]);
+    await db.execute("DELETE FROM study WHERE user=?", [name]);
+    await db.execute("DELETE FROM tasks WHERE user=?", [name]);
+    await db.execute("DELETE FROM bookmarks WHERE user=?", [name]);
+    await db.execute("DELETE FROM timer_settings WHERE user=?", [name]);
+    await db.execute("DELETE FROM generated_images WHERE user=?", [name]);
+    res.json({ message: "User and all data deleted" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error deleting user" });
+  }
+});
+
+// ─── Admin: Delete course ─────────────────────────────────────────────────────
+app.post("/admin/delete-course", adminAuth, async (req, res) => {
+  try {
+    const id = Number(req.body.id);
+    if (!id) return res.status(400).json({ error: "Missing id" });
+    await db.execute("DELETE FROM courses WHERE id=?", [id]);
+    res.json({ message: "Course deleted" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error deleting course" });
+  }
+});
+
+// ─── Admin: Get all suggestions ───────────────────────────────────────────────
+app.post("/admin/suggestions", adminAuth, async (req, res) => {
+  try {
+    const [rows] = await db.execute(
+      "SELECT id, user, type, text, createdAt FROM suggestions ORDER BY id DESC LIMIT 100"
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error fetching suggestions" });
+  }
+});
+
+// ─── Admin: Delete suggestion ─────────────────────────────────────────────────
+app.post("/admin/delete-suggestion", adminAuth, async (req, res) => {
+  try {
+    const id = Number(req.body.id);
+    if (!id) return res.status(400).json({ error: "Missing id" });
+    await db.execute("DELETE FROM suggestions WHERE id=?", [id]);
+    res.json({ message: "Suggestion deleted" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error deleting suggestion" });
+  }
+});
+
+// ─── Admin: Get leaderboard (full) ───────────────────────────────────────────
+app.post("/admin/leaderboard", adminAuth, async (req, res) => {
+  try {
+    const [rows] = await db.execute(`
+      SELECT user AS name, COUNT(*) AS chapters
+      FROM study GROUP BY user ORDER BY chapters DESC LIMIT 50
+    `);
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Leaderboard error" });
+  }
+});
+
+// ─── Admin: Get generated images ─────────────────────────────────────────────
+app.post("/admin/images", adminAuth, async (req, res) => {
+  try {
+    const [rows] = await db.execute(
+      "SELECT id, user, prompt, style, imageUrl, createdAt FROM generated_images ORDER BY id DESC LIMIT 50"
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error fetching images" });
+  }
+});
+
+// ─── Admin: Broadcast announcement (stored for users) ────────────────────────
+app.post("/admin/announce", adminAuth, async (req, res) => {
+  try {
+    const message = normalizeText(req.body.message);
+    if (!message) return res.status(400).json({ error: "Missing message" });
+    // Store in a simple key-value via notes table with special key
+    await db.execute(
+      `INSERT INTO notes (className, subject, chapter, content) VALUES ('__admin__','__admin__','announcement',?)
+       ON DUPLICATE KEY UPDATE content=?, createdAt=NOW()`,
+      [message, message]
+    );
+    res.json({ message: "Announcement set" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error saving announcement" });
+  }
+});
+
+// ─── Public: Get announcement ─────────────────────────────────────────────────
+app.get("/announcement", async (req, res) => {
+  try {
+    const [rows] = await db.execute(
+      "SELECT content, createdAt FROM notes WHERE className='__admin__' AND subject='__admin__' AND chapter='announcement'"
+    );
+    if (!rows.length) return res.json({ announcement: null });
+    res.json({ announcement: rows[0].content, updatedAt: rows[0].createdAt });
+  } catch (err) {
+    res.json({ announcement: null });
+  }
+});
+
+// ─── Admin: Clear announcement ────────────────────────────────────────────────
+app.post("/admin/clear-announce", adminAuth, async (req, res) => {
+  try {
+    await db.execute(
+      "DELETE FROM notes WHERE className='__admin__' AND subject='__admin__' AND chapter='announcement'"
+    );
+    res.json({ message: "Announcement cleared" });
+  } catch (err) {
+    res.status(500).json({ error: "Error clearing announcement" });
+  }
+});
+
+// ─── Admin: Reset user password ───────────────────────────────────────────────
+app.post("/admin/reset-password", adminAuth, async (req, res) => {
+  try {
+    const name = normalizeText(req.body.name);
+    const newPassword = normalizeText(req.body.newPassword);
+    if (!name || !newPassword) return res.status(400).json({ error: "Missing fields" });
+    const [r] = await db.execute("SELECT id FROM users WHERE name=?", [name]);
+    if (!r.length) return res.status(404).json({ error: "User not found" });
+    await db.execute("UPDATE users SET password=? WHERE name=?", [newPassword, name]);
+    res.json({ message: "Password reset for " + name });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Error resetting password" });
+  }
+});
+
 // ─── Root ──────────────────────────────────────────────────────────────────────
 
 app.get("/", (req, res) => {
