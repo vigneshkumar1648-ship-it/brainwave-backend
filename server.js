@@ -9,6 +9,8 @@ const rateLimit = require("express-rate-limit");
 
 const app = express();
 
+app.set("trust proxy", 1); // Fix for Render X-Forwarded-For / rate-limit issue
+
 app.use(cors({ origin: "*" }));
 app.use(express.json({ limit: "10mb" }));
 
